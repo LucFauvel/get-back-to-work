@@ -4,7 +4,7 @@ use rand::seq::SliceRandom;
 
 use serenity::{
     all::{
-        Cache, Channel, ChannelId, CreateInteractionResponse, CreateMessage, EditMember, GuildId, Http, MessageBuilder, Ready
+        Cache, ChannelId, CreateMessage, EditMember, GuildId, Http, Ready
     },
     async_trait,
     futures::channel::oneshot::{channel, Sender},
@@ -19,9 +19,8 @@ async fn get_current_channel_users(http: &Http, cache: &Cache) {
         Ok(guild) => {
             if let Ok(channels) = guild.channels(&http).await {
                 if let Some(channel) = channels.get(&ChannelId::new(GUILD_ID)) {
-                    if let Ok(members) = channel.members(&cache) {
-                        if let Some(random_user) = members.choose(&mut OsRng) {
-                            let mut random_user = random_user.clone();
+                    if let Ok(mut members) = channel.members(&cache) {
+                        if let Some(random_user) = members.choose_mut(&mut OsRng) {
                             let builder = CreateMessage::new().content(format!(
                                 "We are going to make <@{}>",
                                 random_user.user.id.to_string()
@@ -31,9 +30,7 @@ async fn get_current_channel_users(http: &Http, cache: &Cache) {
                                 .send_message(http, builder)
                                 .await;
 
-                            random_user.edit(http, EditMember::new().mute(true).deafen(true)).await;
-
-                            
+                            let _ = random_user.edit(http, EditMember::new().mute(true).deafen(true)).await;
                         }
                     }
                 }
