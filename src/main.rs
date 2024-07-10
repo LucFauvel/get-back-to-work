@@ -3,43 +3,48 @@ use rand::rngs::OsRng;
 use rand::seq::SliceRandom;
 
 use serenity::{
-    all::{
-        Cache, ChannelId, CreateMessage, EditMember, GuildId, Http, Ready
-    },
+    all::{Cache, ChannelId, CreateMessage, EditMember, GuildId, Http, Ready},
     async_trait,
     futures::channel::oneshot::{channel, Sender},
+    model::error::Error as SerenityModelError,
     prelude::*,
+    Error as SerenityError,
 };
 use std::env;
 use tokio::time::{sleep, Duration};
 
-pub const GUILD_ID: u64 = 1221093432274194457;
-async fn get_current_channel_users(http: &Http, cache: &Cache) {
-    match http.get_guild(GuildId::new(1221093431364026438)).await {
-        Ok(guild) => {
-            if let Ok(channels) = guild.channels(&http).await {
-                if let Some(channel) = channels.get(&ChannelId::new(GUILD_ID)) {
-                    if let Ok(mut members) = channel.members(&cache) {
-                        if let Some(random_user) = members.choose_mut(&mut OsRng) {
-                            let builder = CreateMessage::new().content(format!(
-                                "We are going to make <@{}>",
-                                random_user.user.id.to_string()
-                            ));
+pub const GUILD_ID: u64 = 1221093431364026438;
+pub const VOICE_CHANNEL_ID: u64 = 1221093432274194457;
+pub const TEXT_CHANNEL_ID: u64 = 1221112008800469052;
 
-                            let _ = ChannelId::new(1221112008800469052)
-                                .send_message(http, builder)
-                                .await;
+async fn mute_random_user(http: &Http, cache: &Cache) -> Result<(), SerenityError> {
+    let mut channel_members = http
+        .get_guild(GuildId::new(GUILD_ID))
+        .await?
+        .channels(http)
+        .await?
+        .get(&ChannelId::new(VOICE_CHANNEL_ID))
+        .ok_or(SerenityModelError::ChannelNotFound)?
+        .members(cache)?;
 
-                            let _ = random_user.edit(http, EditMember::new().mute(true).deafen(true)).await;
-                        }
-                    }
-                }
-            }
-        }
-        Err(why) => {
-            println!("Error getting guild: {:?}", why);
-        }
-    }
+    let random_channel_member = channel_members
+        .choose_mut(&mut OsRng)
+        .ok_or(SerenityModelError::MemberNotFound)?;
+
+    let builder = CreateMessage::new().content(format!(
+        "We are going to mute <@{}>",
+        random_channel_member.user.id
+    ));
+
+    ChannelId::new(TEXT_CHANNEL_ID)
+        .send_message(http, builder)
+        .await?;
+
+    random_channel_member
+        .edit(http, EditMember::new().mute(true).deafen(true))
+        .await?;
+
+    Ok(())
 }
 
 struct ReadyOneshotSender;
@@ -61,27 +66,24 @@ impl EventHandler for Handler {
 
 #[tokio::main]
 async fn main() {
-    dotenv().ok();
-
+    let _ = dotenv();
     let (tx, rx) = channel::<bool>();
 
-    // Login with a bot token from the environment
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
     let bot_time_str = env::var("BOT_TIME").expect("Expected a bot time");
     let bot_time = bot_time_str
         .parse::<u64>()
         .expect("Expected a number for bot time");
-    // Set gateway intents, which decides what events the bot will be notified about
+
     let intents = GatewayIntents::GUILD_MESSAGES
         | GatewayIntents::DIRECT_MESSAGES
         | GatewayIntents::GUILDS
         | GatewayIntents::MESSAGE_CONTENT;
 
-    // Create a new instance of the Client, logging in as a bot.
     let mut client = Client::builder(&token, intents)
         .event_handler(Handler)
         .await
-        .expect("Err creating client");
+        .expect("Error creating client");
 
     client.data.write().await.insert::<ReadyOneshotSender>(tx);
 
@@ -92,9 +94,10 @@ async fn main() {
     tokio::spawn(async move {
         let _ = rx.await;
         loop {
-            get_current_channel_users(&http, &cache).await;
+            if let Err(why) = mute_random_user(&http, &cache).await {
+                println!("Error muting random user: {why:?}");
+            }
 
-            //Pick someone at random here
             sleep(Duration::from_secs(bot_time)).await;
         }
     });
