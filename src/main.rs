@@ -1,5 +1,6 @@
 use serenity::{all::Message, async_trait, prelude::*};
 use std::env;
+use tokio::time::{sleep, Duration};
 
 struct Handler;
 
@@ -31,4 +32,12 @@ async fn main() {
     if let Err(why) = client.start().await {
         println!("Client error: {why:?}");
     }
+
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_secs(60 * 20)).await
+
+            //Pick someone at random here
+        }
+    });
 }
