@@ -1,14 +1,9 @@
 use dotenv::dotenv;
 use serenity::{
-    all::{Cache, ChannelId, GuildId, Http, Ready},
-    async_trait,
-    prelude::*,
+    all::{Cache, ChannelId, GuildId, Http, Ready}, async_trait, futures::channel::oneshot::{channel, Sender}, prelude::*
 };
 use std::env;
-use tokio::{
-    sync::oneshot::{self, Receiver, Sender},
-    time::{sleep, Duration},
-};
+use tokio::time::{sleep, Duration};
 
 pub const GUILD_ID: u64 = 1221093432274194457;
 async fn get_current_channel_users(http: &Http, cache: &Cache) {
@@ -26,18 +21,21 @@ async fn get_current_channel_users(http: &Http, cache: &Cache) {
     }
 }
 
-struct ReadyOneshot {
-    pub sender: Sender<bool>,
-    pub reader: Receiver<bool>
+struct ReadyOneshotSender;
+
+impl TypeMapKey for ReadyOneshotSender {
+    type Value = Sender<bool>;
 }
 
-struct Handler<'a> {
-    pub ready_oneshot : &'a mut ReadyOneshot
-}
+struct Handler;
 
 #[async_trait]
-impl<'a> EventHandler for Handler<'a> {
-    async fn ready(&self, _: Context, ready: Ready) {
+impl EventHandler for Handler {
+    async fn ready(&self, ctx: Context, _: Ready) {
+        if let Some(tx) = ctx.data.write().await.remove::<ReadyOneshotSender>() {
+            let _ = tx.send(true);
+        }
+        // self.ready_sender.send(true);
         println!("ready af");
         // get_current_channel_users(http, cache)
     }
@@ -47,7 +45,7 @@ impl<'a> EventHandler for Handler<'a> {
 async fn main() {
     dotenv().ok();
 
-    let (tx, rx) = oneshot::channel::<bool>();
+    let (tx, rx) = channel::<bool>();
 
     // Login with a bot token from the environment
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
@@ -61,17 +59,13 @@ async fn main() {
         | GatewayIntents::GUILDS
         | GatewayIntents::MESSAGE_CONTENT;
 
-
-    let mut ready_oneshot = ReadyOneshot {
-        sender: tx,
-        reader: rx
-    };
-
     // Create a new instance of the Client, logging in as a bot.
     let mut client = Client::builder(&token, intents)
-        .event_handler(Handler{ ready_oneshot: &mut ready_oneshot })
+        .event_handler(Handler)
         .await
         .expect("Err creating client");
+
+    client.data.write().await.insert::<ReadyOneshotSender>(tx);
 
     println!("starting a timer with interval of {} seconds", bot_time);
 
@@ -79,7 +73,6 @@ async fn main() {
     let cache = client.cache.clone();
     tokio::spawn(async move {
         let _ = rx.await;
-
         loop {
             get_current_channel_users(&http, &cache).await;
 
