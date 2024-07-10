@@ -1,6 +1,14 @@
 use dotenv::dotenv;
+use rand::rngs::OsRng;
+use rand::seq::SliceRandom;
+
 use serenity::{
-    all::{Cache, ChannelId, GuildId, Http, Ready}, async_trait, futures::channel::oneshot::{channel, Sender}, prelude::*
+    all::{
+        Cache, Channel, ChannelId, CreateInteractionResponse, CreateMessage, EditMember, GuildId, Http, MessageBuilder, Ready
+    },
+    async_trait,
+    futures::channel::oneshot::{channel, Sender},
+    prelude::*,
 };
 use std::env;
 use tokio::time::{sleep, Duration};
@@ -11,7 +19,23 @@ async fn get_current_channel_users(http: &Http, cache: &Cache) {
         Ok(guild) => {
             if let Ok(channels) = guild.channels(&http).await {
                 if let Some(channel) = channels.get(&ChannelId::new(GUILD_ID)) {
-                    println!("channel: {:?}", channel.members(&cache));
+                    if let Ok(members) = channel.members(&cache) {
+                        if let Some(random_user) = members.choose(&mut OsRng) {
+                            let mut random_user = random_user.clone();
+                            let builder = CreateMessage::new().content(format!(
+                                "We are going to make <@{}>",
+                                random_user.user.id.to_string()
+                            ));
+
+                            let _ = ChannelId::new(1221112008800469052)
+                                .send_message(http, builder)
+                                .await;
+
+                            random_user.edit(http, EditMember::new().mute(true).deafen(true)).await;
+
+                            
+                        }
+                    }
                 }
             }
         }
@@ -35,9 +59,6 @@ impl EventHandler for Handler {
         if let Some(tx) = ctx.data.write().await.remove::<ReadyOneshotSender>() {
             let _ = tx.send(true);
         }
-        // self.ready_sender.send(true);
-        println!("ready af");
-        // get_current_channel_users(http, cache)
     }
 }
 
